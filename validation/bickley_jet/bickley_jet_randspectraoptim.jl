@@ -1,6 +1,9 @@
+cd("/home/brynn/Code/Oceananigans.jl")
+
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Advection: VelocityStencil, VorticityStencil
+
 
 using Printf
 using GLMakie
@@ -105,20 +108,76 @@ function visualize_bickley_jet(name)
     end
 end
 
+using EnsembleKalmanProcesses
+using EnsembleKalmanProcesses.Observations
+using EnsembleKalmanProcesses.DataContainers
+using EnsembleKalmanProcesses.ParameterDistributions
+using Random
+using LinearAlgebra
+using Statistics
+using Distributions
+const EKP = EnsembleKalmanProcesses 
+
+N_iterations = 2
+N_ens = 2
+rng_seed = 4137
+Random.seed!(rng_seed)
+
+dim_output = 1
+stabilization_level = 1e-3
+Γ_stabilization = stabilization_level * Matrix(I, dim_output, dim_output)
+
+G_target = [0]
+
+#prior_list = Vector{Dict{String,Any}}
+prior_list = []
+for a_i in 1:36
+    temp = Dict("distribution" => Parameterized(Normal(2, sqrt(2))), "constraint" => no_constraint(), "name" => "u"*string(a_i))
+    push!(prior_list, temp)
+end
+prior_list = convert(Vector{Dict{String,Any}}, prior_list)
+
+
 coeffs = Tuple(Tuple(rand() for i in 1:6) for j in 1:6)
 advection_schemes = [WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)]
 
-#=
-advection_schemes = [WENO5(vector_invariant=VelocityStencil()),
-                     WENO5(vector_invariant=VorticityStencil()),
-                     WENO5(),
-                     VectorInvariant()]
-=#
+
+
+priors = EKP.ParameterDistribution(prior_list)
+initial_ensemble = EKP.construct_initial_ensemble(priors, N_ens; rng_seed = rng_seed)
+ensemble_kalman_process = EKP.EnsembleKalmanProcess(initial_ensemble, G_target, Γ_stabilization, Inversion())
+
+#dummy loss
+function G₁(params)
+    return rand()
+
+end
 
 arch = CPU()
-for Nh in [128]
-    for momentum_advection in advection_schemes
-        name = run_bickley_jet(; arch, momentum_advection, Nh)
-        visualize_bickley_jet(name)
+for i in 1:N_iterations     
+    params_i = get_u_final(ensemble_kalman_process)      
+    #need to pass params_i into model somehow and generate some loss
+    g_ens = []
+    for j in 1:N_ens
+        params = params_i[:, j] 
+        coeffs = Tuple(Tuple(params[k*l] for k in 1:6) for l in 1:6)
+        advection_schemes = [WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)] 
+        for Nh in [64]
+       
+            for momentum_advection in advection_schemes
+                name = run_bickley_jet(; arch, momentum_advection, Nh)
+                #visualize_bickley_jet(name)
+            end
+            push!(g_ens, G₁(params_i[:, j]))
+            
+            #data = generate_spectra(name) #DO THIS !!!
+            #push!(g_ens, calculate_loss(data, truth_spectra))
+          
+        end
     end
+    @show size(g_ens)
+    g_ens = convert(Matrix{Float64}, g_ens')
+    EKP.update_ensemble!(ensemble_kalman_process, g_ens)
 end
+u_init = get_u_prior(ensemble_kalman_process)
+u_final = get_u_final(ensemble_kalman_process)
