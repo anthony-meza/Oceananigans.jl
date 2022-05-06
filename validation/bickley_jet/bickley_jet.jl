@@ -105,8 +105,8 @@ function visualize_bickley_jet(name)
     end
 end
 
-coeffs = Tuple(Tuple(rand() for i in 1:6) for j in 1:6)
-advection_schemes = [WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)]
+# coeffs = Tuple(Tuple(rand() for i in 1:6) for j in 1:6)
+advection_schemes = [WENO5(vector_invariant = VorticityStencil())]
 
 #=
 advection_schemes = [WENO5(vector_invariant=VelocityStencil()),

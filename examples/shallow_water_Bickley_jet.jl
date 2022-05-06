@@ -22,7 +22,7 @@
 # using Pkg
 # pkg"add Oceananigans, NCDatasets, Plots, Printf, Polynomials"
 # ```
-
+using Pkg
 using Oceananigans
 using Oceananigans.Models: ShallowWaterModel
 

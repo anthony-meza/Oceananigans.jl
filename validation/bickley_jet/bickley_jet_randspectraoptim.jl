@@ -1,14 +1,77 @@
-cd("/home/brynn/Code/Oceananigans.jl")
-
+# cd("/home/brynn/Code/Oceananigans.jl")
+cd("/Users/anthonymeza/Documents/GitHub/Oceananigans.jl")
+#first you need to add the EKP package from your github repo
+# using Pkg; Pkg.add(url = "/Users/anthonymeza/Documents/GitHub/EnsembleKalmanProcesses.jl/")
+using Pkg, FileIO
+Pkg.activate("/Users/anthonymeza/Documents/GitHub/Oceananigans.jl/")
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Advection: VelocityStencil, VorticityStencil
-
-
+using EnsembleKalmanProcesses
+using EnsembleKalmanProcesses.Observations
+using EnsembleKalmanProcesses.DataContainers
+using EnsembleKalmanProcesses.ParameterDistributions
+using Random
+using LinearAlgebra
+using Statistics
+using Distributions
+const EKP = EnsembleKalmanProcesses 
 using Printf
 using GLMakie
 
 include("bickley_utils.jl")
+exp_name = "G1_loss"
+mkpath(exp_name)
+println("Running experiment with... ", exp_name)
+
+N_iterations = 1
+N_ens = 1
+rng_seed = 4137
+Random.seed!(rng_seed)
+
+dim_output = 1
+stabilization_level = 1e-3
+Γ_stabilization = stabilization_level * Matrix(I, dim_output, dim_output)
+
+G_target = [0]
+
+#prior_list = Vector{Dict{String,Any}}
+prior_list = []
+for a_i in 1:36
+    temp = Dict("distribution" => Parameterized(Normal(5, 1)), "constraint" => no_constraint(), "name" => "u"*string(a_i) ) 
+    push!(prior_list, temp)
+end
+prior_list = convert(Vector{Dict{String,Any}}, prior_list)
+priors = EKP.ParameterDistribution(prior_list)
+initial_ensemble = EKP.construct_initial_ensemble(priors, N_ens; rng_seed = rng_seed)
+ensemble_kalman_process = EKP.EnsembleKalmanProcess(initial_ensemble, G_target, Γ_stabilization, Inversion())
+
+function G₁(name)
+    filepath = name * ".jld2"
+    ζt = FieldTimeSeries(filepath, "ζ")
+    t = ζt.times
+    Nt = length(t)
+    z_start = interior(ζt[1], :, :, 1)
+    z_end = interior(ζt[Nt], :, :, 1)
+    enst_start = sum(z_start.^2)
+    enst_end = sum(z_end.^2)
+    return abs(enst_start - enst_end)
+end
+
+function G2(name)
+    filepath = name * ".jld2"
+    ζt = FieldTimeSeries(filepath, "ζ")
+    t = ζt.times
+    Nt = length(t)
+    z_start = [sum(interior(ζt[i], :, :, 1).^2) for i = 1:Nt-1]
+    z_end = [sum(interior(ζt[i], :, :, 1).^2) for i = 2:Nt]
+    enst = zeros(length(z_start))
+    temp1 = sqrt(sum((z_end.^2 .- z_start.^2).^2))
+    return sum(temp1)
+end
+
+save_losses = zeros(N_ens, N_iterations)
+
 
 """
     run_bickley_jet(output_time_interval = 2, stop_time = 200, arch = CPU(), Nh = 64, ν = 0,
@@ -108,50 +171,9 @@ function visualize_bickley_jet(name)
     end
 end
 
-using EnsembleKalmanProcesses
-using EnsembleKalmanProcesses.Observations
-using EnsembleKalmanProcesses.DataContainers
-using EnsembleKalmanProcesses.ParameterDistributions
-using Random
-using LinearAlgebra
-using Statistics
-using Distributions
-const EKP = EnsembleKalmanProcesses 
-
-N_iterations = 2
-N_ens = 2
-rng_seed = 4137
-Random.seed!(rng_seed)
-
-dim_output = 1
-stabilization_level = 1e-3
-Γ_stabilization = stabilization_level * Matrix(I, dim_output, dim_output)
-
-G_target = [0]
-
-#prior_list = Vector{Dict{String,Any}}
-prior_list = []
-for a_i in 1:36
-    temp = Dict("distribution" => Parameterized(Normal(2, sqrt(2))), "constraint" => no_constraint(), "name" => "u"*string(a_i))
-    push!(prior_list, temp)
-end
-prior_list = convert(Vector{Dict{String,Any}}, prior_list)
-
-
-coeffs = Tuple(Tuple(rand() for i in 1:6) for j in 1:6)
-advection_schemes = [WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)]
 
 
 
-priors = EKP.ParameterDistribution(prior_list)
-initial_ensemble = EKP.construct_initial_ensemble(priors, N_ens; rng_seed = rng_seed)
-ensemble_kalman_process = EKP.EnsembleKalmanProcess(initial_ensemble, G_target, Γ_stabilization, Inversion())
-
-#dummy loss
-function G₁(params)
-    return rand()
-
-end
 
 arch = CPU()
 for i in 1:N_iterations     
@@ -161,23 +183,24 @@ for i in 1:N_iterations
     for j in 1:N_ens
         params = params_i[:, j] 
         coeffs = Tuple(Tuple(params[k*l] for k in 1:6) for l in 1:6)
-        advection_schemes = [WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)] 
-        for Nh in [64]
-       
-            for momentum_advection in advection_schemes
-                name = run_bickley_jet(; arch, momentum_advection, Nh)
-                #visualize_bickley_jet(name)
-            end
-            push!(g_ens, G₁(params_i[:, j]))
-            
-            #data = generate_spectra(name) #DO THIS !!!
-            #push!(g_ens, calculate_loss(data, truth_spectra))
-          
-        end
+        momentum_advection = WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)
+        Nh = 128       
+        name = run_bickley_jet(; arch, momentum_advection, Nh)
+        push!(g_ens, G2(name))
+        #data = generate_spectra(name) #DO THIS !!!
     end
-    @show size(g_ens)
+    save_losses[:, i] .= g_ens
     g_ens = convert(Matrix{Float64}, g_ens')
     EKP.update_ensemble!(ensemble_kalman_process, g_ens)
 end
+
+save_object(exp_name*"_losses.jld2", save_losses)
 u_init = get_u_prior(ensemble_kalman_process)
 u_final = get_u_final(ensemble_kalman_process)
+
+β_optim = mean(u_final, dims = 2)
+coeffs = Tuple(Tuple(β_optim[k*l] for k in 1:6) for l in 1:6)
+momentum_advection = WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)
+Nh = 128        
+name = run_bickley_jet(; arch, momentum_advection, Nh)
+visualize_bickley_jet(name)
