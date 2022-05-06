@@ -1,9 +1,10 @@
-# cd("/home/brynn/Code/Oceananigans.jl")
-cd("/Users/anthonymeza/Documents/GitHub/Oceananigans.jl")
+cd("/home/brynn/Code/Oceananigans.jl")
+#cd("/Users/anthonymeza/Documents/GitHub/Oceananigans.jl")
 #first you need to add the EKP package from your github repo
-# using Pkg; Pkg.add(url = "/Users/anthonymeza/Documents/GitHub/EnsembleKalmanProcesses.jl/")
+#using Pkg; Pkg.add(url = "/Users/anthonymeza/Documents/GitHub/EnsembleKalmanProcesses.jl/")
+#using Pkg; Pkg.add(url = "/home/brynn/Repos/EnsembleKalmanProcesses.jl/")
 using Pkg, FileIO
-Pkg.activate("/Users/anthonymeza/Documents/GitHub/Oceananigans.jl/")
+Pkg.activate(".")
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Advection: VelocityStencil, VorticityStencil
@@ -18,7 +19,9 @@ using Distributions
 const EKP = EnsembleKalmanProcesses 
 using Printf
 using GLMakie
+using JLD2
 
+cd("validation/bickley_jet")
 include("bickley_utils.jl")
 exp_name = "G1_loss"
 mkpath(exp_name)
@@ -55,7 +58,14 @@ function G₁(name)
     z_end = interior(ζt[Nt], :, :, 1)
     enst_start = sum(z_start.^2)
     enst_end = sum(z_end.^2)
-    return abs(enst_start - enst_end)
+
+    #
+    spec_2048 = [24.312371182474553, 0.016955630982388614, 0.006849002562262672, 0.003360390720253825]
+
+    include("post_process_spec.jl")
+    spec = hov_ζ_w1_128_x
+    
+    return abs(enst_start - enst_end) + sum(abs(spec - spec_2048))
 end
 
 function G2(name)
@@ -172,9 +182,6 @@ function visualize_bickley_jet(name)
 end
 
 
-
-
-
 arch = CPU()
 for i in 1:N_iterations     
     params_i = get_u_final(ensemble_kalman_process)      
@@ -203,4 +210,4 @@ coeffs = Tuple(Tuple(β_optim[k*l] for k in 1:6) for l in 1:6)
 momentum_advection = WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)
 Nh = 128        
 name = run_bickley_jet(; arch, momentum_advection, Nh)
-visualize_bickley_jet(name)
+#visualize_bickley_jet(name)
