@@ -7,11 +7,11 @@ using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 #using GLMakie
 using JLD2
 
-include("/home/brynn/Downloads/utils.jl")
+include("./utils.jl")
 #cd("/home/brynn/Code/337/new_jld2")
 
 
-path_str = "/home/brynn/Downloads/bickley_jet_Nh_128_WENO5.jld2"
+path_str = "/Users/anthonymeza/Documents/GitHub/Oceananigans.jl/bickley_jet_Nh_128_WENO5.jld2"
 #path_str = "/home/brynn/donttransfer/bickley_jet_Nh_2048_WENO5.jld2"
 #path_str = name 
 scheme = :WENO5

@@ -1,5 +1,5 @@
-cd("/home/brynn/Code/Oceananigans.jl")
-#cd("/Users/anthonymeza/Documents/GitHub/Oceananigans.jl")
+# cd("/home/brynn/Code/Oceananigans.jl")
+cd("/Users/anthonymeza/Documents/GitHub/Oceananigans.jl")
 #first you need to add the EKP package from your github repo
 #using Pkg; Pkg.add(url = "/Users/anthonymeza/Documents/GitHub/EnsembleKalmanProcesses.jl/")
 #using Pkg; Pkg.add(url = "/home/brynn/Repos/EnsembleKalmanProcesses.jl/")
@@ -23,12 +23,12 @@ using JLD2
 
 cd("validation/bickley_jet")
 include("bickley_utils.jl")
-exp_name = "G1_loss"
+exp_name = "G2_loss"
 mkpath(exp_name)
 println("Running experiment with... ", exp_name)
 
-N_iterations = 1
-N_ens = 1
+N_iterations = 10
+N_ens = 10
 rng_seed = 4137
 Random.seed!(rng_seed)
 
@@ -49,7 +49,7 @@ priors = EKP.ParameterDistribution(prior_list)
 initial_ensemble = EKP.construct_initial_ensemble(priors, N_ens; rng_seed = rng_seed)
 ensemble_kalman_process = EKP.EnsembleKalmanProcess(initial_ensemble, G_target, Γ_stabilization, Inversion())
 
-function G₁(name)
+function G1(name)
     filepath = name * ".jld2"
     ζt = FieldTimeSeries(filepath, "ζ")
     t = ζt.times
@@ -63,9 +63,9 @@ function G₁(name)
     spec_2048 = [24.312371182474553, 0.016955630982388614, 0.006849002562262672, 0.003360390720253825]
 
     include("post_process_spec.jl")
-    spec = hov_ζ_w1_128_x
+    spec = hov_ζ_w1_128_x[2:4]
     
-    return abs(enst_start - enst_end) + sum(abs(spec - spec_2048))
+    return (enst_start - enst_end)^2
 end
 
 function G2(name)
@@ -75,13 +75,31 @@ function G2(name)
     Nt = length(t)
     z_start = [sum(interior(ζt[i], :, :, 1).^2) for i = 1:Nt-1]
     z_end = [sum(interior(ζt[i], :, :, 1).^2) for i = 2:Nt]
-    enst = zeros(length(z_start))
-    temp1 = sqrt(sum((z_end.^2 .- z_start.^2).^2))
-    return sum(temp1)
+    # enst = zeros(length(z_start))
+    temp1 = sum((z_end .- z_start).^2)/length(z_end)
+    return sqrt(temp1)
+end
+
+function G3(name)
+    filepath = name * ".jld2"
+    ζt = FieldTimeSeries(filepath, "ζ")
+    t = ζt.times
+    Nt = length(t)
+    z_start = interior(ζt[1], :, :, 1)
+    z_end = interior(ζt[Nt], :, :, 1)
+    enst_start = sum(z_start.^2)
+    enst_end = sum(z_end.^2)
+
+    #
+    spec_2048 = log10.([0.016955630982388614, 0.006849002562262672, 0.003360390720253825])
+
+    include("post_process_spec.jl")
+    spec = log10.(hov_ζ_w1_128_x[2:4])
+    
+    return sum((spec .- spec_2048[2:end]).^2)
 end
 
 save_losses = zeros(N_ens, N_iterations)
-
 
 """
     run_bickley_jet(output_time_interval = 2, stop_time = 200, arch = CPU(), Nh = 64, ν = 0,
@@ -189,7 +207,7 @@ for i in 1:N_iterations
     g_ens = []
     for j in 1:N_ens
         params = params_i[:, j] 
-        coeffs = Tuple(Tuple(params[k*l] for k in 1:6) for l in 1:6)
+        coeffs = Tuple(Tuple(params[k + (l*6)] for k in 1:6) for l in 0:5)
         momentum_advection = WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)
         Nh = 128       
         name = run_bickley_jet(; arch, momentum_advection, Nh)
@@ -201,7 +219,7 @@ for i in 1:N_iterations
     EKP.update_ensemble!(ensemble_kalman_process, g_ens)
 end
 
-save_object(exp_name*"_losses.jld2", save_losses)
+save_object(exp_name*"/"*exp_name*"_losses.jld2", save_losses)
 u_init = get_u_prior(ensemble_kalman_process)
 u_final = get_u_final(ensemble_kalman_process)
 
@@ -210,4 +228,4 @@ coeffs = Tuple(Tuple(β_optim[k*l] for k in 1:6) for l in 1:6)
 momentum_advection = WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)
 Nh = 128        
 name = run_bickley_jet(; arch, momentum_advection, Nh)
-#visualize_bickley_jet(name)
+visualize_bickley_jet(name)
