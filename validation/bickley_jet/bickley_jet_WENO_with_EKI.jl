@@ -1,8 +1,8 @@
 # cd("/home/brynn/Code/Oceananigans.jl")
 cd("/home/ameza/batou-home/Repos/Oceananigans.jl")
 #first you need to add the EKP package from your github repo
+#then add package to your default manifest (NOT Oceananigans)
 #using Pkg; Pkg.add(url = "/Users/anthonymeza/Documents/GitHub/EnsembleKalmanProcesses.jl/")
-# using Pkg; Pkg.add(url = "/home/ameza/batou-home/Repos/EnsembleKalmanProcesses.jl/")
 using Pkg; Pkg.activate(".")
 # Pkg.instantiate()
 using Pkg, FileIO
@@ -24,10 +24,13 @@ using JLD2
 
 cd("validation/bickley_jet")
 include("bickley_utils.jl")
-exp_name = "G3_loss"
+exps = ["G1_loss", "G2_loss", "G3_loss"]
+exp_name = exps[3]
+#can also use G1_loss or G2_loss 
 mkpath(exp_name)
 println("Running experiment with... ", exp_name)
 
+#setting number of iterations and ensemble members for EKI 
 N_iterations = 5
 N_ens = 5
 rng_seed = 4137
@@ -36,20 +39,23 @@ Random.seed!(rng_seed)
 dim_output = 1
 stabilization_level = 1e-3
 Γ_stabilization = stabilization_level * Matrix(I, dim_output, dim_output)
-
 G_target = [0]
 
-#prior_list = Vector{Dict{String,Any}}
+#Initializing priors for 36 WENO coefficients 
 prior_list = []
 for a_i in 1:36
     temp = Dict("distribution" => Parameterized(Normal(5, 1)), "constraint" => no_constraint(), "name" => "u"*string(a_i) ) 
     push!(prior_list, temp)
 end
+
+#Defining EKI 
 prior_list = convert(Vector{Dict{String,Any}}, prior_list)
 priors = EKP.ParameterDistribution(prior_list)
 initial_ensemble = EKP.construct_initial_ensemble(priors, N_ens; rng_seed = rng_seed)
 ensemble_kalman_process = EKP.EnsembleKalmanProcess(initial_ensemble, G_target, Γ_stabilization, Inversion())
 
+
+#Defining loss functions G1, G2, G3
 function G1(name)
     filepath = name * ".jld2"
     ζt = FieldTimeSeries(filepath, "ζ")
@@ -90,6 +96,16 @@ function G3(name)
     return sum((spec .- spec_2048).^2)
 end
 
+#loss function "switch"
+function get_loss(name, exp_name)
+    if exp_name == "G1_loss"
+        return G1(name)
+    elseif exp_name == "G2_loss"
+        return G2(name)
+    elseif exp_name == "G3_loss"
+        return G3(name)
+    end 
+end
 save_losses = zeros(N_ens, N_iterations)
 
 """
@@ -201,8 +217,7 @@ for i in 1:N_iterations
         momentum_advection = WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)
         Nh = 128       
         name = run_bickley_jet(Threads.threadid(); arch, momentum_advection, Nh)
-        g_ens[j] = G3(name)
-        #data = generate_spectra(name) #DO THIS !!!
+        g_ens[j] = get_loss(name, exp_name)
     end
     save_losses[:, i] .= g_ens
     println(g_ens)
@@ -213,9 +228,8 @@ end
 save_object(exp_name*"/"*exp_name*"_losses.jld2", save_losses)
 u_init = get_u_prior(ensemble_kalman_process)
 u_final = get_u_final(ensemble_kalman_process)
-
 β_optim = mean(u_final, dims = 2)
-coeffs = Tuple(Tuple(β_optim[k*l] for k in 1:6) for l in 1:6)
+coeffs = Tuple(Tuple(β_optim[k + (l*6)] for k in 1:6) for l in 1:6)
 momentum_advection = WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)
 Nh = 128        
 name = run_bickley_jet(0; arch, momentum_advection, Nh)
