@@ -1,10 +1,11 @@
 # cd("/home/brynn/Code/Oceananigans.jl")
-cd("/Users/anthonymeza/Documents/GitHub/Oceananigans.jl")
+cd("/home/ameza/batou-home/Repos/Oceananigans.jl")
 #first you need to add the EKP package from your github repo
 #using Pkg; Pkg.add(url = "/Users/anthonymeza/Documents/GitHub/EnsembleKalmanProcesses.jl/")
-#using Pkg; Pkg.add(url = "/home/brynn/Repos/EnsembleKalmanProcesses.jl/")
+# using Pkg; Pkg.add(url = "/home/ameza/batou-home/Repos/EnsembleKalmanProcesses.jl/")
+using Pkg; Pkg.activate(".")
+# Pkg.instantiate()
 using Pkg, FileIO
-Pkg.activate(".")
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Advection: VelocityStencil, VorticityStencil
@@ -23,12 +24,12 @@ using JLD2
 
 cd("validation/bickley_jet")
 include("bickley_utils.jl")
-exp_name = "G2_loss"
+exp_name = "G3_loss"
 mkpath(exp_name)
 println("Running experiment with... ", exp_name)
 
-N_iterations = 10
-N_ens = 10
+N_iterations = 5
+N_ens = 5
 rng_seed = 4137
 Random.seed!(rng_seed)
 
@@ -59,7 +60,6 @@ function G1(name)
     enst_start = sum(z_start.^2)
     enst_end = sum(z_end.^2)
 
-    #
     spec_2048 = [24.312371182474553, 0.016955630982388614, 0.006849002562262672, 0.003360390720253825]
 
     include("post_process_spec.jl")
@@ -81,22 +81,13 @@ function G2(name)
 end
 
 function G3(name)
-    filepath = name * ".jld2"
-    ζt = FieldTimeSeries(filepath, "ζ")
-    t = ζt.times
-    Nt = length(t)
-    z_start = interior(ζt[1], :, :, 1)
-    z_end = interior(ζt[Nt], :, :, 1)
-    enst_start = sum(z_start.^2)
-    enst_end = sum(z_end.^2)
-
     #
     spec_2048 = log10.([0.016955630982388614, 0.006849002562262672, 0.003360390720253825])
 
     include("post_process_spec.jl")
     spec = log10.(hov_ζ_w1_128_x[2:4])
     
-    return sum((spec .- spec_2048[2:end]).^2)
+    return sum((spec .- spec_2048).^2)
 end
 
 save_losses = zeros(N_ens, N_iterations)
@@ -108,9 +99,9 @@ save_losses = zeros(N_ens, N_iterations)
 Run the Bickley jet validation experiment until `stop_time` using `momentum_advection`
 scheme or formulation, with horizontal resolution `Nh`, viscosity `ν`, on `arch`itecture.
 """
-function run_bickley_jet(;
+function run_bickley_jet(thread_id;
                          output_time_interval = 2,
-                         stop_time = 200,
+                         stop_time = 100,
                          arch = CPU(),
                          Nh = 64, 
                          free_surface = ImplicitFreeSurface(gravitational_acceleration=10.0),
@@ -141,7 +132,7 @@ function run_bickley_jet(;
     u, v, w = model.velocities
     outputs = merge(model.velocities, model.tracers, (ζ=∂x(v) - ∂y(u), η=model.free_surface.η))
 
-    @show output_name = "bickley_jet_Nh_$(Nh)_" * experiment_name
+    @show output_name = "bickley_jet_Nh_$(Nh)_" * experiment_name * exp_name * string(thread_id)
 
     simulation.output_writers[:fields] =
         JLD2OutputWriter(model, outputs,
@@ -203,18 +194,18 @@ end
 arch = CPU()
 for i in 1:N_iterations     
     params_i = get_u_final(ensemble_kalman_process)      
-    #need to pass params_i into model somehow and generate some loss
-    g_ens = []
+    g_ens = zeros(N_ens)
     for j in 1:N_ens
         params = params_i[:, j] 
         coeffs = Tuple(Tuple(params[k + (l*6)] for k in 1:6) for l in 0:5)
         momentum_advection = WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)
         Nh = 128       
-        name = run_bickley_jet(; arch, momentum_advection, Nh)
-        push!(g_ens, G2(name))
+        name = run_bickley_jet(Threads.threadid(); arch, momentum_advection, Nh)
+        g_ens[j] = G3(name)
         #data = generate_spectra(name) #DO THIS !!!
     end
     save_losses[:, i] .= g_ens
+    println(g_ens)
     g_ens = convert(Matrix{Float64}, g_ens')
     EKP.update_ensemble!(ensemble_kalman_process, g_ens)
 end
@@ -227,5 +218,5 @@ u_final = get_u_final(ensemble_kalman_process)
 coeffs = Tuple(Tuple(β_optim[k*l] for k in 1:6) for l in 1:6)
 momentum_advection = WENO5(vector_invariant = VorticityStencil(), smoothness_coeffs = coeffs)
 Nh = 128        
-name = run_bickley_jet(; arch, momentum_advection, Nh)
-visualize_bickley_jet(name)
+name = run_bickley_jet(0; arch, momentum_advection, Nh)
+# visualize_bickley_jet(name)

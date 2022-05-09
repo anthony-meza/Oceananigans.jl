@@ -11,9 +11,9 @@ include("./utils.jl")
 #cd("/home/brynn/Code/337/new_jld2")
 
 
-path_str = "/Users/anthonymeza/Documents/GitHub/Oceananigans.jl/bickley_jet_Nh_128_WENO5.jld2"
+path_str = "/home/ameza/batou-home/Repos/Oceananigans.jl/validation/bickley_jet/bickley_jet_Nh_128_WENO5"*exp_name*string(Threads.threadid())*".jld2"
 #path_str = "/home/brynn/donttransfer/bickley_jet_Nh_2048_WENO5.jld2"
-#path_str = name 
+# path_str = name 
 scheme = :WENO5
 adv = :w1_
 varnames  = [:u, :v, :ζ, :c]
@@ -109,8 +109,9 @@ for name in [varnames..., :k], n in sizes, dir in [:_x, :_y, :_r]
     spec = Symbol(:hov_, name, :_, adv, n, dir)
     orig = Symbol(:spec_, name, :_, adv, n, dir)
     @eval begin
-        $spec = zeros(Int($n/2), 101)
-        for i in 1:101
+        #used to 101
+        $spec = zeros(Int($n/2), length(iterations))
+        for i in 1:length(iterations)
             $spec[:, i] = $orig[i].spec        
         end
         #save_object(string(counter)*".jld2", $spec)
